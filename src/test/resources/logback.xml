@@ -6,8 +6,9 @@
     </encoder>
   </appender>
 
-  <logger name="org.terracotta.angela" level="WARN">
-  </logger>
+  <logger name="org.terracotta.angela.external.client" level="INFO"/>
+  <logger name="org.terracotta.angela" level="WARN"/>
+  <logger name="org.zeroturnaround.process" level="WARN"/>
 
   <root level="INFO">
     <appender-ref ref="CONSOLE" />
