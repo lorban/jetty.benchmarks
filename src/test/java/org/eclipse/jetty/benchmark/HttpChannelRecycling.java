@@ -40,7 +40,7 @@ public class HttpChannelRecycling
     {
         long before = System.nanoTime();
         System.out.println("Running client; " + count + " requests...");
-        HttpClient httpClient = new HttpClient(new HttpClientTransportOverHTTP2(new HTTP2Client()));
+        HttpClient httpClient = new HttpClient(new HttpClientTransportOverHTTP2(new HTTP2Client()), null);
         httpClient.start();
         ExecutorService executorService = Executors.newFixedThreadPool(8);
 
@@ -82,7 +82,6 @@ public class HttpChannelRecycling
 
             ClientArrayFuture caf = clientArray.executeOnAll((cluster ->
             {
-                System.setProperty("jetty.debug.recycleHttpChannels", "false");
                 Server server = new Server();
                 HttpConfiguration httpConfig = new HttpConfiguration();
                 ServerConnector serverConnector = new ServerConnector(server, new HTTP2CServerConnectionFactory(httpConfig));
