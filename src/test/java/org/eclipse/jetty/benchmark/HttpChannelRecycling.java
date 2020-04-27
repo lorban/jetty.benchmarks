@@ -12,6 +12,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Predicate;
 
 import org.eclipse.jetty.benchmark.handlers.AsyncHandler;
 import org.eclipse.jetty.client.HttpClient;
@@ -25,17 +26,63 @@ import org.eclipse.jetty.server.ServerConnector;
 import org.junit.jupiter.api.Test;
 import org.terracotta.angela.client.Client;
 import org.terracotta.angela.client.ClientArray;
-import org.terracotta.angela.client.ClientArrayFuture;
 import org.terracotta.angela.client.ClusterFactory;
 import org.terracotta.angela.client.config.ConfigurationContext;
+import org.terracotta.angela.client.filesystem.RemoteFile;
 import org.terracotta.angela.common.ToolExecutionResult;
 import org.terracotta.angela.common.topology.ClientArrayTopology;
 
-import static org.terracotta.angela.client.config.custom.CustomConfigurationContext.customConfigurationContext;
+import static org.terracotta.angela.client.config.custom.CustomMultiConfigurationContext.customMultiConfigurationContext;
 import static org.terracotta.angela.common.clientconfig.ClientArrayConfig.newClientArrayConfig;
 
 public class HttpChannelRecycling
 {
+
+    @Test
+    void httpChannelRecycling() throws Exception
+    {
+        System.setProperty("angela.rootDir", "/work/angela");
+        System.setProperty("angela.java.version", "1.11");
+
+        ConfigurationContext configContext = customMultiConfigurationContext()
+            .clientArray(clientArray -> clientArray.clientArrayTopology(new ClientArrayTopology(newClientArrayConfig().host("localhost"))))
+            .clientArray(clientArray -> clientArray.clientArrayTopology(new ClientArrayTopology(newClientArrayConfig().host("localhost"))))
+            ;
+
+        try (ClusterFactory factory = new ClusterFactory("AngelaTest::httpChannelRecycling", configContext))
+        {
+            ClientArray serverClientArray = factory.clientArray();
+            ClientArray clientClientArray = factory.clientArray();
+
+            serverClientArray.executeOnAll(cluster ->
+            {
+                Server server = new Server();
+                HttpConfiguration httpConfig = new HttpConfiguration();
+                ServerConnector serverConnector = new ServerConnector(server, new HTTP2CServerConnectionFactory(httpConfig));
+                serverConnector.setPort(8080);
+                server.addConnector(serverConnector);
+                server.setHandler(new AsyncHandler("Hi there!".getBytes(StandardCharsets.ISO_8859_1)));
+                server.start();
+            }).get();
+
+            System.out.println("Warming up...");
+            clientClientArray.executeOnAll(cluster -> runClient(1_500_000, "http://localhost:8080")).get();
+
+            System.out.println("Benchmarking...");
+            jcmd(serverClientArray, "JFR.start", "name=jetty-server", "settings=profile");
+            jcmd(clientClientArray, "JFR.start", "name=jetty-client", "settings=profile");
+            clientClientArray.executeOnAll(cluster -> runClient(3_000_000, "http://localhost:8080")).get();
+
+            System.out.println("Collecting flight recordings...");
+            jcmd(serverClientArray, "JFR.dump", "name=jetty-server", "filename=jetty-server.jfr");
+            jcmd(serverClientArray, "JFR.stop", "name=jetty-server");
+            downloadFlightRecordings(serverClientArray, "jetty-server.jfr");
+            jcmd(clientClientArray, "JFR.dump", "name=jetty-client", "filename=jetty-client.jfr");
+            jcmd(clientClientArray, "JFR.stop", "name=jetty-client");
+            downloadFlightRecordings(clientClientArray, "jetty-client.jfr");
+        }
+    }
+
     private static void runClient(int count, String urlAsString) throws Exception
     {
         long before = System.nanoTime();
@@ -66,56 +113,28 @@ public class HttpChannelRecycling
         System.out.println("Stopped client; ran for " + elapsedSeconds + " seconds");
     }
 
-    @Test
-    void httpChannelRecycling() throws Exception
+    private void jcmd(ClientArray clientArray, String... arguments)
     {
-        System.setProperty("angela.rootDir", "/work/angela");
-        System.setProperty("angela.java.version", "1.11");
-
-        ConfigurationContext configContext = customConfigurationContext()
-            .clientArray(clientArray -> clientArray.clientArrayTopology(new ClientArrayTopology(newClientArrayConfig().host("localhost"))));
-
-        try (ClusterFactory factory = new ClusterFactory("AngelaTest::httpChannelRecycling", configContext))
+        for (Client client : clientArray.getClients())
         {
-            ClientArray clientArray = factory.clientArray();
-            Client client = clientArray.getClients().iterator().next();
-
-            ClientArrayFuture caf = clientArray.executeOnAll((cluster ->
-            {
-                Server server = new Server();
-                HttpConfiguration httpConfig = new HttpConfiguration();
-                ServerConnector serverConnector = new ServerConnector(server, new HTTP2CServerConnectionFactory(httpConfig));
-                serverConnector.setPort(8080);
-                server.addConnector(serverConnector);
-                server.setHandler(new AsyncHandler("Hi there!".getBytes(StandardCharsets.ISO_8859_1)));
-                server.start();
-            }));
-            caf.get();
-
-            System.out.println("Warming up...");
-            runClient(1_500_000, "http://localhost:8080");
-
-            ToolExecutionResult toolExecutionResult = clientArray.jcmd(client).executeCommand("JFR.start", "name=jetty-server", "settings=profile");
+            ToolExecutionResult toolExecutionResult = clientArray.jcmd(client).executeCommand(arguments);
             if (toolExecutionResult.getExitStatus() != 0)
                 throw new RuntimeException("JCMD failure: " + toolExecutionResult);
+        }
+    }
 
-            System.out.println("Benchmarking...");
-            runClient(3_000_000, "http://localhost:8080");
-
-            toolExecutionResult = clientArray.jcmd(client).executeCommand("JFR.dump", "name=jetty-server", "filename=jetty-server.jfr");
-            if (toolExecutionResult.getExitStatus() != 0)
-                throw new RuntimeException("JCMD failure: " + toolExecutionResult);
-            toolExecutionResult = clientArray.jcmd(client).executeCommand("JFR.stop", "name=jetty-server");
-            if (toolExecutionResult.getExitStatus() != 0)
-                throw new RuntimeException("JCMD failure: " + toolExecutionResult);
-
-            client.browse(".").list().stream().filter(rf -> rf.getName().endsWith(".jfr")).forEach(rf ->
+    private void downloadFlightRecordings(ClientArray clientArray, String remoteFilename)
+    {
+        for (Client client : clientArray.getClients())
+        {
+            Predicate<RemoteFile> filter = rf -> rf.getName().equals(remoteFilename);
+            client.browse(".").list().stream().filter(filter).forEach(rf ->
             {
                 try
                 {
                     File target = new File("./target/jfr");
                     target.mkdirs();
-                    String localFilename = "jetty-server-" + new SimpleDateFormat("yyyy-MM-dd_HH-mm-ss").format(new Date()) + ".jfr";
+                    String localFilename = new SimpleDateFormat("yyyy-MM-dd_HH:mm:ss_").format(new Date()) + remoteFilename;
                     rf.downloadTo(new File(target, localFilename));
                 }
                 catch (IOException e)
