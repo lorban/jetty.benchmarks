@@ -32,6 +32,12 @@
     </dependency>
 
     <dependency>
+      <groupId>io.rainfall</groupId>
+      <artifactId>rainfall-core</artifactId>
+      <version>1.5.1-SNAPSHOT</version>
+    </dependency>
+
+    <dependency>
       <groupId>org.eclipse.jetty</groupId>
       <artifactId>jetty-servlet</artifactId>
       <version>${jetty.version}</version>
@@ -46,13 +52,11 @@
       <groupId>org.eclipse.jetty</groupId>
       <artifactId>jetty-client</artifactId>
       <version>${jetty.version}</version>
-      <scope>test</scope>
     </dependency>
     <dependency>
       <groupId>org.eclipse.jetty.http2</groupId>
       <artifactId>http2-http-client-transport</artifactId>
       <version>${jetty.version}</version>
-      <scope>test</scope>
     </dependency>
   </dependencies>
 
