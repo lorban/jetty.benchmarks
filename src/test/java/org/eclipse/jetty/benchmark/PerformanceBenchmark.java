@@ -18,11 +18,13 @@ import org.eclipse.jetty.benchmark.handlers.SyncConsumingHandler;
 import org.eclipse.jetty.benchmark.rainfall.configs.JettyClientConfiguration;
 import org.eclipse.jetty.benchmark.rainfall.operations.HttpResult;
 import org.eclipse.jetty.client.HttpClient;
+import org.eclipse.jetty.client.http.HttpClientTransportOverHTTP;
 import org.eclipse.jetty.client.util.BytesContentProvider;
 import org.eclipse.jetty.http2.client.HTTP2Client;
 import org.eclipse.jetty.http2.client.http.HttpClientTransportOverHTTP2;
 import org.eclipse.jetty.http2.server.HTTP2CServerConnectionFactory;
 import org.eclipse.jetty.server.HttpConfiguration;
+import org.eclipse.jetty.server.HttpConnectionFactory;
 import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.server.ServerConnector;
 import org.eclipse.jetty.util.ssl.SslContextFactory;
@@ -54,6 +56,7 @@ public class PerformanceBenchmark
     public static final int THREAD_PER_CLIENT_COUNT = 2;
     public static final int WARMUP_OCCURRENCES = 100_000;
     public static final int BENCHMARK_DURATION_IN_SECONDS = 60;
+    public static final boolean USE_HTTP2 = true;
 
     @BeforeAll
     public static void setUp()
@@ -80,7 +83,7 @@ public class PerformanceBenchmark
             {
                 Server server = new Server();
                 HttpConfiguration httpConfig = new HttpConfiguration();
-                ServerConnector serverConnector = new ServerConnector(server, new HTTP2CServerConnectionFactory(httpConfig));
+                ServerConnector serverConnector = new ServerConnector(server, new HttpConnectionFactory(), new HTTP2CServerConnectionFactory(httpConfig));
                 serverConnector.setPort(8080);
                 server.addConnector(serverConnector);
                 server.setHandler(new SyncConsumingHandler("Hi there!".getBytes(StandardCharsets.ISO_8859_1)));
@@ -97,7 +100,9 @@ public class PerformanceBenchmark
                         get(.8, "http://localhost:8080"),
                         post(.2, "http://localhost:8080", contentProvider)
                     );
-                HttpClient httpClient = new HttpClient(new HttpClientTransportOverHTTP2(new HTTP2Client()), new SslContextFactory.Client());
+                HttpClient httpClient = USE_HTTP2 ?
+                    new HttpClient(new HttpClientTransportOverHTTP2(new HTTP2Client()), new SslContextFactory.Client()) :
+                    new HttpClient(new HttpClientTransportOverHTTP(), new SslContextFactory.Client());
                 httpClient.start();
 
                 Barrier barrier = cluster.barrier("start-mark", CLIENT_COUNT);
