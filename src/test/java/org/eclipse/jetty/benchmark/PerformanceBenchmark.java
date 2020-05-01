@@ -17,16 +17,21 @@ import io.rainfall.reporting.PeriodicHlogReporter;
 import org.eclipse.jetty.benchmark.handlers.SyncConsumingHandler;
 import org.eclipse.jetty.benchmark.rainfall.configs.JettyClientConfiguration;
 import org.eclipse.jetty.benchmark.rainfall.operations.HttpResult;
+import org.eclipse.jetty.client.HttpClient;
 import org.eclipse.jetty.client.util.BytesContentProvider;
+import org.eclipse.jetty.http2.client.HTTP2Client;
+import org.eclipse.jetty.http2.client.http.HttpClientTransportOverHTTP2;
 import org.eclipse.jetty.http2.server.HTTP2CServerConnectionFactory;
 import org.eclipse.jetty.server.HttpConfiguration;
 import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.server.ServerConnector;
+import org.eclipse.jetty.util.ssl.SslContextFactory;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.terracotta.angela.client.Client;
 import org.terracotta.angela.client.ClientArray;
 import org.terracotta.angela.client.ClusterFactory;
+import org.terracotta.angela.client.ClusterMonitor;
 import org.terracotta.angela.client.config.ConfigurationContext;
 import org.terracotta.angela.client.filesystem.RemoteFile;
 import org.terracotta.angela.common.cluster.Barrier;
@@ -41,6 +46,7 @@ import static org.eclipse.jetty.benchmark.rainfall.operations.HttpOperations.get
 import static org.eclipse.jetty.benchmark.rainfall.operations.HttpOperations.post;
 import static org.terracotta.angela.client.config.custom.CustomMultiConfigurationContext.customMultiConfigurationContext;
 import static org.terracotta.angela.common.clientconfig.ClientArrayConfig.newClientArrayConfig;
+import static org.terracotta.angela.common.metrics.HardwareMetric.*;
 
 public class PerformanceBenchmark
 {
@@ -61,12 +67,14 @@ public class PerformanceBenchmark
     {
         ConfigurationContext configurationContext = customMultiConfigurationContext()
             .clientArray(clientArray -> clientArray.clientArrayTopology(new ClientArrayTopology(newClientArrayConfig().host("localhost"))))
-            .clientArray(clientArray -> clientArray.clientArrayTopology(new ClientArrayTopology(newClientArrayConfig().hostSerie(CLIENT_COUNT, "localhost"))));
+            .clientArray(clientArray -> clientArray.clientArrayTopology(new ClientArrayTopology(newClientArrayConfig().hostSerie(CLIENT_COUNT, "localhost"))))
+            .monitoring(monitoring -> monitoring.commands(EnumSet.of(CPU, MEMORY, NETWORK)));
 
         try (ClusterFactory factory = new ClusterFactory("RainfallPerformance::mix", configurationContext))
         {
             ClientArray serverClientArray = factory.clientArray();
             ClientArray clientClientArray = factory.clientArray();
+            ClusterMonitor monitoring = factory.monitor();
 
             serverClientArray.executeOnAll(cluster ->
             {
@@ -79,6 +87,7 @@ public class PerformanceBenchmark
                 server.start();
             }).get();
 
+            monitoring.startOnAll();
             System.out.println("Benchmarking...");
             clientClientArray.executeOnAll(cluster ->
             {
@@ -88,27 +97,32 @@ public class PerformanceBenchmark
                         get(.8, "http://localhost:8080"),
                         post(.2, "http://localhost:8080", contentProvider)
                     );
+                HttpClient httpClient = new HttpClient(new HttpClientTransportOverHTTP2(new HTTP2Client()), new SslContextFactory.Client());
+                httpClient.start();
 
                 Barrier barrier = cluster.barrier("start-mark", CLIENT_COUNT);
                 int clientId = barrier.await();
                 System.out.println("Client " + clientId + " started, waiting for other clients...");
-                warmupClient(scenario);
+                warmupClient(scenario, httpClient);
 
                 System.out.println("Client " + clientId + " warmed up, waiting for other clients before starting benchmark...");
                 barrier.await();
-                benchmarkClient(scenario);
+                benchmarkClient(scenario, httpClient);
 
+                httpClient.stop();
                 System.out.println("Client " + clientId + " done benchmarking");
             }).get();
 
+            monitoring.stopOnAll();
             System.out.println("Collecting reports...");
-            downloadAndAggregateReports(clientClientArray);
+            String targetRoot = "./target/reports/" + new SimpleDateFormat("yyyy-MM-dd_HH:mm:ss").format(new Date());
+            downloadAndAggregateReports(targetRoot + "/histograms", clientClientArray);
+            monitoring.downloadTo(new File(targetRoot, "monitoring"));
         }
     }
 
-    private void downloadAndAggregateReports(ClientArray clientArray)
+    private void downloadAndAggregateReports(String targetRoot, ClientArray clientArray)
     {
-        String date = new SimpleDateFormat("yyyy-MM-dd_HH:mm:ss").format(new Date());
         for (Client client : clientArray.getClients())
         {
             Predicate<RemoteFile> filter = rf -> rf.isFolder() && rf.getName().equals("rainfall-histo");
@@ -116,9 +130,9 @@ public class PerformanceBenchmark
             {
                 try
                 {
-                    String reportSubdir = "./target/reports/" + date + "/" + client.getSymbolicName();
-                    File target = new File(reportSubdir);
-                    target.mkdirs();
+                    File target = new File(targetRoot, client.getSymbolicName());
+                    if (!target.mkdirs())
+                        throw new IOException("Error creating folders: " + target);
                     rf.downloadTo(target);
                 }
                 catch (IOException e)
@@ -129,23 +143,23 @@ public class PerformanceBenchmark
         }
         HtmlReport.aggregateInPlace(EnumSet.allOf(HttpResult.class).toArray(new Enum[0]),
             clientArray.getClients().stream().map(Client::getSymbolicName).collect(Collectors.toList()),
-            new File("./target/reports/" + date));
+            new File(targetRoot));
     }
 
-    private void warmupClient(Scenario scenario) throws Exception
+    private void warmupClient(Scenario scenario, HttpClient httpClient) throws Exception
     {
         Runner.setUp(scenario)
             .executed(times(WARMUP_OCCURRENCES))
-            .config(new JettyClientConfiguration(), concurrencyConfig().threads(THREAD_PER_CLIENT_COUNT),
+            .config(new JettyClientConfiguration(httpClient), concurrencyConfig().threads(THREAD_PER_CLIENT_COUNT),
                 report(HttpResult.class))
             .start();
     }
 
-    private void benchmarkClient(Scenario scenario) throws Exception
+    private void benchmarkClient(Scenario scenario, HttpClient httpClient) throws Exception
     {
         Runner.setUp(scenario)
             .executed(during(BENCHMARK_DURATION_IN_SECONDS, seconds))
-            .config(new JettyClientConfiguration(), concurrencyConfig().threads(THREAD_PER_CLIENT_COUNT),
+            .config(new JettyClientConfiguration(httpClient), concurrencyConfig().threads(THREAD_PER_CLIENT_COUNT),
                 report(HttpResult.class).log(new PeriodicHlogReporter<>("rainfall-histo")))
             .start();
     }
