@@ -10,12 +10,14 @@ import io.rainfall.Operation;
 import io.rainfall.statistics.StatisticsHolder;
 import org.eclipse.jetty.benchmark.rainfall.configs.JettyClientConfiguration;
 import org.eclipse.jetty.client.api.ContentProvider;
+import org.eclipse.jetty.client.api.Request;
 import org.eclipse.jetty.http.HttpMethod;
 
 import static org.eclipse.jetty.benchmark.rainfall.operations.HttpResult.EXCEPTION;
 
 class PostOperation implements Operation
 {
+    private final Counter closeCounter = new Counter(10);
     private final String urlAsString;
     private final ContentProvider contentProvider;
 
@@ -35,11 +37,13 @@ class PostOperation implements Operation
         try
         {
             DiscardingResponseListener responseListener = new DiscardingResponseListener();
-            jettyClientConfiguration.getHttpClient()
+            Request request = jettyClientConfiguration.getHttpClient()
                 .newRequest(urlAsString)
                 .content(contentProvider)
-                .method(HttpMethod.POST)
-                .send(responseListener);
+                .method(HttpMethod.POST);
+            if (closeCounter.increment())
+                request.header("Connection", "close");
+            request.send(responseListener);
             result = HttpResult.from(responseListener.waitForResponse());
         }
         catch (Exception e)
