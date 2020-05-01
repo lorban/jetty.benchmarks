@@ -14,9 +14,10 @@ import io.rainfall.Runner;
 import io.rainfall.Scenario;
 import io.rainfall.reporting.HtmlReport;
 import io.rainfall.reporting.PeriodicHlogReporter;
-import org.eclipse.jetty.benchmark.handlers.AsyncHandler;
-import org.eclipse.jetty.benchmark.operations.HttpResult;
-import org.eclipse.jetty.benchmark.operations.JettyClientConfiguration;
+import org.eclipse.jetty.benchmark.handlers.SyncConsumingHandler;
+import org.eclipse.jetty.benchmark.rainfall.configs.JettyClientConfiguration;
+import org.eclipse.jetty.benchmark.rainfall.operations.HttpResult;
+import org.eclipse.jetty.client.util.BytesContentProvider;
 import org.eclipse.jetty.http2.server.HTTP2CServerConnectionFactory;
 import org.eclipse.jetty.server.HttpConfiguration;
 import org.eclipse.jetty.server.Server;
@@ -36,31 +37,33 @@ import static io.rainfall.configuration.ReportingConfig.report;
 import static io.rainfall.execution.Executions.during;
 import static io.rainfall.execution.Executions.times;
 import static io.rainfall.unit.TimeDivision.seconds;
-import static org.eclipse.jetty.benchmark.operations.HttpOperations.get;
+import static org.eclipse.jetty.benchmark.rainfall.operations.HttpOperations.get;
+import static org.eclipse.jetty.benchmark.rainfall.operations.HttpOperations.post;
 import static org.terracotta.angela.client.config.custom.CustomMultiConfigurationContext.customMultiConfigurationContext;
 import static org.terracotta.angela.common.clientconfig.ClientArrayConfig.newClientArrayConfig;
 
-public class RainfallPerformance
+public class PerformanceBenchmark
 {
-    private static final int CLIENT_COUNT = 3;
-    private static final int THREAD_PER_CLIENT_COUNT = 2;
-    private static ConfigurationContext ANGELA_CONFIG;
+    public static final int CLIENT_COUNT = 3;
+    public static final int THREAD_PER_CLIENT_COUNT = 2;
+    public static final int WARMUP_OCCURRENCES = 100_000;
+    public static final int BENCHMARK_DURATION_IN_SECONDS = 60;
 
     @BeforeAll
     public static void setUp()
     {
         System.setProperty("angela.rootDir", "/work/angela");
         System.setProperty("angela.java.version", "1.11");
-
-        ANGELA_CONFIG = customMultiConfigurationContext()
-            .clientArray(clientArray -> clientArray.clientArrayTopology(new ClientArrayTopology(newClientArrayConfig().host("localhost"))))
-            .clientArray(clientArray -> clientArray.clientArrayTopology(new ClientArrayTopology(newClientArrayConfig().hostSerie(CLIENT_COUNT, "localhost"))));
     }
 
     @Test
     void mix() throws Exception
     {
-        try (ClusterFactory factory = new ClusterFactory("RainfallPerformance::mix", ANGELA_CONFIG))
+        ConfigurationContext configurationContext = customMultiConfigurationContext()
+            .clientArray(clientArray -> clientArray.clientArrayTopology(new ClientArrayTopology(newClientArrayConfig().host("localhost"))))
+            .clientArray(clientArray -> clientArray.clientArrayTopology(new ClientArrayTopology(newClientArrayConfig().hostSerie(CLIENT_COUNT, "localhost"))));
+
+        try (ClusterFactory factory = new ClusterFactory("RainfallPerformance::mix", configurationContext))
         {
             ClientArray serverClientArray = factory.clientArray();
             ClientArray clientClientArray = factory.clientArray();
@@ -72,21 +75,28 @@ public class RainfallPerformance
                 ServerConnector serverConnector = new ServerConnector(server, new HTTP2CServerConnectionFactory(httpConfig));
                 serverConnector.setPort(8080);
                 server.addConnector(serverConnector);
-                server.setHandler(new AsyncHandler("Hi there!".getBytes(StandardCharsets.ISO_8859_1)));
+                server.setHandler(new SyncConsumingHandler("Hi there!".getBytes(StandardCharsets.ISO_8859_1)));
                 server.start();
             }).get();
 
             System.out.println("Benchmarking...");
             clientClientArray.executeOnAll(cluster ->
             {
+                BytesContentProvider contentProvider = new BytesContentProvider(new byte[512]);
+                Scenario scenario = Scenario.scenario("Mix")
+                    .exec(
+                        get(.8, "http://localhost:8080"),
+                        post(.2, "http://localhost:8080", contentProvider)
+                    );
+
                 Barrier barrier = cluster.barrier("start-mark", CLIENT_COUNT);
                 int clientId = barrier.await();
                 System.out.println("Client " + clientId + " started, waiting for other clients...");
-                warmupClient("http://localhost:8080");
+                warmupClient(scenario);
 
                 System.out.println("Client " + clientId + " warmed up, waiting for other clients before starting benchmark...");
                 barrier.await();
-                benchmarkClient("http://localhost:8080");
+                benchmarkClient(scenario);
 
                 System.out.println("Client " + clientId + " done benchmarking");
             }).get();
@@ -122,33 +132,21 @@ public class RainfallPerformance
             new File("./target/reports/" + date));
     }
 
-    private void warmupClient(String urlAsString) throws Exception
+    private void warmupClient(Scenario scenario) throws Exception
     {
-        try (JettyClientConfiguration jettyClientConfiguration = new JettyClientConfiguration())
-        {
-            Scenario scenario = Scenario.scenario("Mix")
-                .exec(get(urlAsString));
-
-            Runner.setUp(scenario)
-                .executed(times(100_000))
-                .config(jettyClientConfiguration, concurrencyConfig().threads(THREAD_PER_CLIENT_COUNT),
-                    report(HttpResult.class))
-                .start();
-        }
+        Runner.setUp(scenario)
+            .executed(times(WARMUP_OCCURRENCES))
+            .config(new JettyClientConfiguration(), concurrencyConfig().threads(THREAD_PER_CLIENT_COUNT),
+                report(HttpResult.class))
+            .start();
     }
 
-    private void benchmarkClient(String urlAsString) throws Exception
+    private void benchmarkClient(Scenario scenario) throws Exception
     {
-        try (JettyClientConfiguration jettyClientConfiguration = new JettyClientConfiguration())
-        {
-            Scenario scenario = Scenario.scenario("Mix")
-                .exec(get(urlAsString));
-
-            Runner.setUp(scenario)
-                .executed(during(60, seconds))
-                .config(jettyClientConfiguration, concurrencyConfig().threads(THREAD_PER_CLIENT_COUNT),
-                    report(HttpResult.class).log(new PeriodicHlogReporter<>("rainfall-histo")))
-                .start();
-        }
+        Runner.setUp(scenario)
+            .executed(during(BENCHMARK_DURATION_IN_SECONDS, seconds))
+            .config(new JettyClientConfiguration(), concurrencyConfig().threads(THREAD_PER_CLIENT_COUNT),
+                report(HttpResult.class).log(new PeriodicHlogReporter<>("rainfall-histo")))
+            .start();
     }
 }

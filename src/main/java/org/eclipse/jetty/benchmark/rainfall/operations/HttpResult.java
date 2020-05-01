@@ -1,4 +1,4 @@
-package org.eclipse.jetty.benchmark.operations;
+package org.eclipse.jetty.benchmark.rainfall.operations;
 
 public enum HttpResult
 {

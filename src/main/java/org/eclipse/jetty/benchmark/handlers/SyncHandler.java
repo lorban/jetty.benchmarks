@@ -20,7 +20,8 @@ public class SyncHandler extends AbstractHandler
     @Override
     public void handle(String target, Request baseRequest, HttpServletRequest request, HttpServletResponse response) throws IOException, ServletException
     {
-        response.setStatus(200);
         response.getOutputStream().write(answer);
+        response.setStatus(200);
+        baseRequest.setHandled(true);
     }
 }

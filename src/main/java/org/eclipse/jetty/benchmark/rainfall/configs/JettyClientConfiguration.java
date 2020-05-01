@@ -1,4 +1,4 @@
-package org.eclipse.jetty.benchmark.operations;
+package org.eclipse.jetty.benchmark.rainfall.configs;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -9,6 +9,7 @@ import io.rainfall.Configuration;
 import org.eclipse.jetty.client.HttpClient;
 import org.eclipse.jetty.http2.client.HTTP2Client;
 import org.eclipse.jetty.http2.client.http.HttpClientTransportOverHTTP2;
+import org.eclipse.jetty.util.ssl.SslContextFactory;
 
 public class JettyClientConfiguration extends Configuration implements Closeable
 {
@@ -16,7 +17,7 @@ public class JettyClientConfiguration extends Configuration implements Closeable
 
     public JettyClientConfiguration() throws Exception
     {
-        httpClient = new HttpClient(new HttpClientTransportOverHTTP2(new HTTP2Client()), null);
+        httpClient = new HttpClient(new HttpClientTransportOverHTTP2(new HTTP2Client()), new SslContextFactory.Client());
         httpClient.start();
     }
 
@@ -41,6 +42,6 @@ public class JettyClientConfiguration extends Configuration implements Closeable
     @Override
     public List<String> getDescription()
     {
-        return Collections.singletonList("JettyClientConfiguration");
+        return Collections.singletonList("Jetty client");
     }
 }
