@@ -52,8 +52,8 @@ import static org.terracotta.angela.common.metrics.HardwareMetric.*;
 
 public class PerformanceBenchmark
 {
-    public static final int CLIENT_COUNT = 3;
-    public static final int THREAD_PER_CLIENT_COUNT = 2;
+    public static final int CLIENT_COUNT = 2;
+    public static final int THREAD_PER_CLIENT_COUNT = 4;
     public static final int WARMUP_OCCURRENCES = 100_000;
     public static final int BENCHMARK_DURATION_IN_SECONDS = 60;
     public static final boolean USE_HTTP2 = true;
