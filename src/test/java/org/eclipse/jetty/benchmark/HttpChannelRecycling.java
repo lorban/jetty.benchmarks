@@ -87,7 +87,7 @@ public class HttpChannelRecycling
     {
         long before = System.nanoTime();
         System.out.println("Running client; " + count + " requests...");
-        HttpClient httpClient = new HttpClient(new HttpClientTransportOverHTTP2(new HTTP2Client()), null);
+        HttpClient httpClient = new HttpClient(new HttpClientTransportOverHTTP2(new HTTP2Client()));
         httpClient.start();
         ExecutorService executorService = Executors.newFixedThreadPool(8);
 
