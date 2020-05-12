@@ -6,17 +6,19 @@
     </encoder>
   </appender>
 
-  <appender name="REMOTE" class="ch.qos.logback.core.ConsoleAppender">
-    <encoder>
-      <pattern>%msg%n</pattern>
-    </encoder>
-  </appender>
+  <!--
+    <appender name="REMOTE" class="ch.qos.logback.core.ConsoleAppender">
+      <encoder>
+        <pattern>%msg%n</pattern>
+      </encoder>
+    </appender>
 
-  <logger name="org.terracotta.angela.external.client" level="INFO" additivity="false">
-    <appender-ref ref="REMOTE" />
-  </logger>
-  <logger name="org.terracotta.angela" level="WARN"/>
-  <logger name="org.zeroturnaround.process" level="WARN"/>
+    <logger name="org.terracotta.angela.external.client" level="INFO" additivity="false">
+      <appender-ref ref="REMOTE" />
+    </logger>
+    <logger name="org.terracotta.angela" level="WARN"/>
+    <logger name="org.zeroturnaround.process" level="WARN"/>
+  -->
 
   <root level="INFO">
     <appender-ref ref="CONSOLE" />
