@@ -3,6 +3,7 @@ package org.eclipse.jetty.benchmark;
 import java.io.File;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -87,6 +88,7 @@ public class HttpChannelRecycling
     {
         long before = System.nanoTime();
         System.out.println("Running client; " + count + " requests...");
+        URI uri = new URI(urlAsString);
         HttpClient httpClient = new HttpClient(new HttpClientTransportOverHTTP2(new HTTP2Client()));
         httpClient.start();
         ExecutorService executorService = Executors.newFixedThreadPool(8);
@@ -96,7 +98,7 @@ public class HttpChannelRecycling
         {
             Future<Object> f = executorService.submit(() ->
             {
-                ContentResponse response = httpClient.GET(urlAsString);
+                ContentResponse response = httpClient.GET(uri);
                 return null;
             });
             futures.add(f);
