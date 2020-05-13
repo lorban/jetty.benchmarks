@@ -44,7 +44,7 @@ public class HttpChannelRecycling
     void httpChannelRecycling() throws Exception
     {
         System.setProperty("angela.rootDir", "/work/angela");
-        System.setProperty("angela.java.version", "1.11");
+        System.setProperty("angela.java.version", "1.8");
 
         ConfigurationContext configContext = customMultiConfigurationContext()
             .clientArray(clientArray -> clientArray.clientArrayTopology(new ClientArrayTopology(newClientArrayConfig().host("localhost"))))
