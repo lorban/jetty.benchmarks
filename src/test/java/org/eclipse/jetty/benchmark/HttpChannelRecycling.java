@@ -24,6 +24,7 @@ import org.eclipse.jetty.http2.server.HTTP2CServerConnectionFactory;
 import org.eclipse.jetty.server.HttpConfiguration;
 import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.server.ServerConnector;
+import org.eclipse.jetty.util.HttpCookieStore;
 import org.junit.jupiter.api.Test;
 import org.terracotta.angela.client.Client;
 import org.terracotta.angela.client.ClientArray;
@@ -50,7 +51,7 @@ public class HttpChannelRecycling
             .clientArray(clientArray -> clientArray.clientArrayTopology(new ClientArrayTopology(newClientArrayConfig().host("localhost"))))
             ;
 
-        try (ClusterFactory factory = new ClusterFactory("AngelaTest::httpChannelRecycling", configContext))
+        try (ClusterFactory factory = new ClusterFactory("HttpChannelRecycling::httpChannelRecycling", configContext))
         {
             ClientArray serverClientArray = factory.clientArray();
             ClientArray clientClientArray = factory.clientArray();
@@ -90,6 +91,7 @@ public class HttpChannelRecycling
         System.out.println("Running client; " + count + " requests...");
         URI uri = new URI(urlAsString);
         HttpClient httpClient = new HttpClient(new HttpClientTransportOverHTTP2(new HTTP2Client()));
+        httpClient.setCookieStore(new HttpCookieStore.Empty());
         httpClient.start();
         ExecutorService executorService = Executors.newFixedThreadPool(8);
 
